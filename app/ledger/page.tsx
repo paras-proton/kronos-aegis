@@ -3,11 +3,14 @@ import { useState } from "react";
 import { Card, Eyebrow, Disclaimer, Stat, G } from "@/components/ui";
 import GlowCard from "@/components/GlowCard";
 
-type Row = { date: string; asset: string; proceedsGbp: number; costGbp: number; gainGbp: number; qty?: number; selfTransferSuspect?: boolean };
-type Res = { rows: Row[]; gain: number; aea: number; taxable: number; cgtBasic: number; cgtHigher: number; fxGbpUsd?: number; source: "LIVE" | "MOCK"; note?: string; needsManualValuation?: string[]; possibleSelfTransfers?: string[] };
+type Row = { date: string; asset: string; proceedsGbp: number; costGbp: number; gainGbp: number; qty?: number; selfTransferSuspect?: boolean; partialCostBasis?: boolean };
+type Res = { rows: Row[]; gain: number; aea: number; taxable: number; cgtBasic: number; cgtHigher: number; fxGbpUsd?: number; source: "LIVE" | "MOCK"; note?: string; needsManualValuation?: string[]; partialCostBasis?: string[]; possibleSelfTransfers?: string[] };
 const gbp = (n: number) => `£${(n ?? 0).toLocaleString()}`;
 function Badge({ source }: { source: "LIVE" | "MOCK" }) {
   return <span className={`font-mono text-[11px] px-2 py-0.5 rounded-full border ${source === "LIVE" ? "border-ok text-ok" : "border-warn text-warn"}`}>{source}</span>;
+}
+function Chip({ label, title }: { label: string; title: string }) {
+  return <span title={title} className="ml-2 text-[10px] px-1.5 py-0.5 rounded border border-warn text-warn">{label}</span>;
 }
 
 export default function Ledger() {
@@ -48,9 +51,20 @@ export default function Ledger() {
           </div>
           <div className="mt-4 overflow-x-auto">
             <table className="w-full text-sm font-mono">
-              <thead className="text-muted text-left"><tr><th className="py-2">Date</th><th>Asset</th><th className="text-right">Qty</th><th className="text-right">Proceeds £</th><th className="text-right">Gain £</th></tr></thead>
+              <thead className="text-muted text-left"><tr><th className="py-2">Date</th><th>Asset</th><th className="text-right">Qty</th><th className="text-right">Proceeds £</th><th className="text-right">Cost £</th><th className="text-right">Gain £</th></tr></thead>
               <tbody>{l.rows.map((r, i) => (
-                <tr key={i} className="border-t border-edge"><td className="py-2">{r.date}</td><td>{r.asset}{r.selfTransferSuspect && <span title="Sent to a non-contract address — may be your own wallet, which is not a disposal" className="ml-2 text-[10px] px-1.5 py-0.5 rounded border border-warn text-warn">self?</span>}</td><td className="text-right">{r.qty ?? "—"}</td><td className="text-right">{gbp(r.proceedsGbp)}</td><td className={`text-right ${r.gainGbp >= 0 ? "text-ok" : "text-danger"}`}>{gbp(r.gainGbp)}</td></tr>
+                <tr key={i} className="border-t border-edge">
+                  <td className="py-2">{r.date}</td>
+                  <td>
+                    {r.asset}
+                    {r.selfTransferSuspect && <Chip label="self?" title="Sent to a non-contract address — may be your own wallet, which is not a disposal under HMRC rules" />}
+                    {r.partialCostBasis && <Chip label="partial cost" title="Part of the disposed quantity had no matching acquisition inside the window read — allowable cost is understated, so this gain is overstated" />}
+                  </td>
+                  <td className="text-right">{r.qty ?? "—"}</td>
+                  <td className="text-right">{gbp(r.proceedsGbp)}</td>
+                  <td className="text-right">{gbp(r.costGbp)}</td>
+                  <td className={`text-right ${r.gainGbp >= 0 ? "text-ok" : "text-danger"}`}>{gbp(r.gainGbp)}</td>
+                </tr>
               ))}</tbody>
             </table>
           </div>
