@@ -81,12 +81,15 @@ export type LedgerRow = {
   date: string; asset: string; qty: number;
   proceedsGbp: number; costGbp: number; gainGbp: number;
   selfTransferSuspect?: boolean;
+  partialCostBasis?: boolean;
 };
 
 const emptyLedger = (note: string) => ({
   rows: [] as LedgerRow[], gain: 0, aea: AEA_GBP, taxable: 0,
   cgtBasic: 0, cgtHigher: 0,
-  needsManualValuation: [] as string[], possibleSelfTransfers: [] as string[],
+  needsManualValuation: [] as string[],
+  partialCostBasis: [] as string[],
+  possibleSelfTransfers: [] as string[],
   source: "MOCK" as const, note,
 });
 
@@ -157,18 +160,23 @@ export async function getLedger(address: string) {
       return best.price * fx;
     };
 
-    // An asset with ANY unpriced event has an unknowable cost basis. Exclude it from the
-    // totals entirely and say so. Never book it at cost 0 — that overstates the gain.
     const byContract: Record<string, Ev[]> = {};
     for (const e of evs) (byContract[e.contract] ||= []).push(e);
 
     const rows: LedgerRow[] = [];
+    // Two DIFFERENT conditions. Do not merge them again.
+    //   needsManualValuation: asset had an unpriced event -> skipped entirely, EXCLUDED from totals.
+    //   partialCostBasis:     disposal had residual qty after all three matching rules -> counted,
+    //                         but only the matched portion contributed allowable cost.
     const needsManualValuation = new Set<string>();
+    const partialCostBasis = new Set<string>();
     const possibleSelfTransfers = new Set<string>();
     let totalGain = 0;
 
     for (const [contract, list] of Object.entries(byContract)) {
       const priced = list.map((e) => ({ ...e, price: priceGbpAt(contract, e.ts) }));
+      // An asset with ANY unpriced event has an unknowable cost basis. Exclude it from the
+      // totals entirely. Never book it at cost 0 — that would overstate the gain.
       if (priced.some((e) => e.price == null)) {
         if (priced.some((e) => e.dir === -1)) needsManualValuation.add(list[0].symbol);
         continue;
@@ -208,7 +216,11 @@ export async function getLedger(address: string) {
           for (const a of pool) a.remaining -= tq * (a.remaining / poolQty);
           q -= tq;
         }
-        if (q > 1e-12) needsManualValuation.add(s.symbol); // disposal with no acquisition in window
+
+        // Residual quantity with no matching acquisition inside the read window.
+        // The row is still counted, but its allowable cost is understated.
+        const isPartial = q > 1e-12;
+        if (isPartial) partialCostBasis.add(s.symbol);
 
         // A transfer to a non-contract address may be a move between the user's own wallets,
         // which is not a disposal. Flag it; do not silently drop it (gifts ARE disposals).
@@ -220,7 +232,7 @@ export async function getLedger(address: string) {
         rows.push({
           date: s.date, asset: s.symbol, qty: Number(s.qty.toFixed(4)),
           proceedsGbp: Math.round(proceeds), costGbp: Math.round(matchedCost), gainGbp: Math.round(gain),
-          selfTransferSuspect,
+          selfTransferSuspect, partialCostBasis: isPartial,
         });
       }
     }
@@ -233,15 +245,17 @@ export async function getLedger(address: string) {
 
     const note = [
       `Live: Base Blockscout transfers + DefiLlama historical USD prices at GBP FX ${fx.toFixed(3)}. HMRC matching applied in order: same-day, 30-day bed & breakfast, then Section 104 pool.`,
-      needsManualValuation.size ? `EXCLUDED from every figure above (no reliable cost basis): ${[...needsManualValuation].slice(0, 6).join(", ")}. These disposals are real — value them manually.` : "",
+      needsManualValuation.size ? `EXCLUDED from every figure above — no price data, so cost basis is unknowable: ${[...needsManualValuation].slice(0, 6).join(", ")}. These disposals are real; value them manually.` : "",
+      partialCostBasis.size ? `COUNTED but with incomplete cost basis: ${[...partialCostBasis].slice(0, 6).join(", ")}. Part of the disposed quantity had no matching acquisition inside the window read, so the allowable cost is understated and the gain overstated.` : "",
       possibleSelfTransfers.size ? `FLAGGED and still counted: ${[...possibleSelfTransfers].slice(0, 6).join(", ")} were sent to non-contract addresses. If those are your own wallets they are NOT disposals — exclude them yourself.` : "",
-      `Only the most recent ${items.length} ERC-20 transfers were read; FX is current, not historical; holdings acquired before this window understate cost basis. CGT is shown at both bands because it depends on your income. Estimate only — verify before filing.`,
+      `Only the most recent ${items.length} ERC-20 transfers were read; FX is current, not historical. CGT is shown at both bands because it depends on your income. Estimate only — verify before filing.`,
     ].filter(Boolean).join(" ");
 
     return {
       rows: rows.slice(0, 20), gain, aea: AEA_GBP, taxable, cgtBasic, cgtHigher,
       fxGbpUsd: Number(fx.toFixed(4)),
       needsManualValuation: [...needsManualValuation],
+      partialCostBasis: [...partialCostBasis],
       possibleSelfTransfers: [...possibleSelfTransfers],
       source: "LIVE" as const, note,
     };
