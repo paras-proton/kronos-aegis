@@ -5,6 +5,7 @@ import { ScanResult } from "@/lib/mock";
 import GlowCard from "@/components/GlowCard";
 
 type Res = ScanResult & { source: "LIVE" | "MOCK" };
+const isAddr = (a: string) => /^0x[a-fA-F0-9]{40}$/.test(a || "");
 function Badge({ source }: { source: "LIVE" | "MOCK" }) {
   return <span className={`font-mono text-[11px] px-2 py-0.5 rounded-full border ${source === "LIVE" ? "border-ok text-ok" : "border-warn text-warn"}`}>{source}</span>;
 }
@@ -12,19 +13,22 @@ function Badge({ source }: { source: "LIVE" | "MOCK" }) {
 export default function Scan() {
   const [addr, setAddr] = useState("");
   const [res, setRes] = useState<Res | null>(null);
+  const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const run = async () => {
+    setRes(null); setErr(null);
+    if (!isAddr(addr.trim())) { setErr("Enter a valid Base token address — 0x followed by 40 hex characters."); return; }
     setLoading(true);
     try {
-      const r = await fetch("/api/scan", { method: "POST", body: JSON.stringify({ address: addr }) });
+      const r = await fetch("/api/scan", { method: "POST", body: JSON.stringify({ address: addr.trim() }) });
       setRes(await r.json());
-    } catch { setRes(null); } finally { setLoading(false); }
+    } catch { setErr("Live scan failed. Please try again shortly."); } finally { setLoading(false); }
   };
   return (
     <div className="space-y-6">
       <GlowCard gradient={G.amber}>
-        <Eyebrow>Scan · pre-buy safety</Eyebrow>
-        <h1 className="mt-2 text-3xl font-semibold text-white">Check a token before you ape</h1>
+        <Eyebrow>Scan · pre-commit safety</Eyebrow>
+        <h1 className="mt-2 text-3xl font-semibold text-white">Check a token before you commit</h1>
       </GlowCard>
       <Card gradient={G.amber}>
         <div className="flex flex-col sm:flex-row gap-3">
@@ -33,6 +37,7 @@ export default function Scan() {
           <button onClick={run} disabled={loading} className="rounded-xl bg-accent text-bg font-medium px-5 py-3 hover:brightness-110 disabled:opacity-60">{loading ? "Scanning…" : "Scan token"}</button>
         </div>
         <p className="mt-2 text-xs text-gray-400">Live via GoPlus token-security (public). Falls back to sample data if unavailable.</p>
+        {err && <p className="mt-2 text-sm text-warn">{err}</p>}
       </Card>
       {res && (
         <Card gradient={G.amber}>
