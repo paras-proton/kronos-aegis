@@ -1,36 +1,34 @@
 /** @type {import('next').NextConfig} */
 
-// ENFORCED. Only directives that CANNOT break rendering.
+// Derived from a live browser render test of the deployed site (2026-07-08).
 //
-// IMPORTANT: no `default-src` here. default-src is the fallback for script-src
-// and style-src, which are deliberately omitted (Next.js App Router emits inline
-// hydration scripts, `self.__next_f.push`). Adding default-src would block them
-// and blank the page — it compiles and deploys clean, then fails in the browser.
-// Directives below have no fallback behaviour and are inert on this site: it
-// renders no <object>/<embed>, sets no <base>, and posts no HTML forms (all data
-// flows through fetch() to same-origin /api/* routes).
-const enforcedCsp = [
-  "object-src 'none'",
-  "base-uri 'self'",
-  "form-action 'self'",
-  "frame-ancestors 'none'",
-  "upgrade-insecure-requests",
-].join("; ");
-
-// REPORT-ONLY. Never blocks; browsers only log violations.
-// This is where the strict policy lives until a render test proves it safe,
-// or until a nonce is threaded through middleware.
-const reportOnlyCsp = [
+// Measured on /ledger:
+//   - 8 inline <script> tags        -> Next.js App Router hydration payload
+//   - 2 inline <style> tags
+//   - 12 elements with a style attr
+//   - every external resource (script, css, img, font, fetch) is same-origin
+//
+// Therefore: lock every source list to 'self', and accept 'unsafe-inline' for
+// script/style as a documented tradeoff for the framework's inline hydration.
+//
+// DO NOT drop 'unsafe-inline' from script-src without first adding a nonce via
+// middleware — it blanks every page while still returning HTTP 200, so no
+// server-side check will catch it. See AEGIS-CSP-NONCE.
+const csp = [
   "default-src 'self'",
-  "script-src 'self'",
-  "style-src 'self'",
+  "script-src 'self' 'unsafe-inline'",
+  "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data:",
   "font-src 'self'",
+  // The client only ever calls same-origin /api/* — the server makes the
+  // outbound calls to Blockscout/DefiLlama/Frankfurter. This is the directive
+  // that stops injected code exfiltrating a pasted wallet address.
   "connect-src 'self'",
   "object-src 'none'",
   "base-uri 'self'",
   "form-action 'self'",
   "frame-ancestors 'none'",
+  "upgrade-insecure-requests",
 ].join("; ");
 
 const securityHeaders = [
@@ -39,8 +37,7 @@ const securityHeaders = [
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), interest-cohort=()" },
   { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" },
-  { key: "Content-Security-Policy", value: enforcedCsp },
-  { key: "Content-Security-Policy-Report-Only", value: reportOnlyCsp },
+  { key: "Content-Security-Policy", value: csp },
 ];
 
 const nextConfig = {
