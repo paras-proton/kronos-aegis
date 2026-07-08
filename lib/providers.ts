@@ -12,8 +12,19 @@ async function jget(url: string) {
 }
 
 // ---------- SCAN: GoPlus token security (keyless) ----------
-export async function getScan(address: string): Promise<ScanResult & { source: "LIVE" | "MOCK" }> {
-  if (!isAddr(address)) return { ...mockScan(address), source: "MOCK" };
+// Invalid INPUT must never produce a safety verdict. A genuine upstream FAILURE
+// may fall back to clearly-labelled MOCK sample data. These are different things.
+const invalidScan = (reason: string): ScanResult & { source: "MOCK"; invalid: true } => ({
+  level: "warn",
+  liquidityUsd: 0, lpLocked: false, topHoldersPct: 0,
+  honeypot: false, sellTaxPct: 0, ownerCanMint: false,
+  contractVerified: false, ageDays: 0,
+  reasons: [reason],
+  source: "MOCK", invalid: true,
+});
+
+export async function getScan(address: string): Promise<ScanResult & { source: "LIVE" | "MOCK"; invalid?: boolean }> {
+  if (!isAddr(address)) return invalidScan("Enter a valid Base token address (0x followed by 40 hex characters). No safety verdict is shown for invalid input.");
   try {
     const j = await jget(`https://api.gopluslabs.io/api/v1/token_security/${BASE_CHAIN}?contract_addresses=${address}`);
     const d = j?.result?.[address.toLowerCase()];
