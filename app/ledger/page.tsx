@@ -3,8 +3,9 @@ import { useState } from "react";
 import { Card, Eyebrow, Disclaimer, Stat, G } from "@/components/ui";
 import GlowCard from "@/components/GlowCard";
 
-type Row = { date: string; asset: string; proceedsGbp: number; costGbp: number; gainGbp: number; qty?: number };
-type Res = { rows: Row[]; gain: number; aea: number; taxable: number; cgt: number; fxGbpUsd?: number; source: "LIVE" | "MOCK"; note?: string };
+type Row = { date: string; asset: string; proceedsGbp: number; costGbp: number; gainGbp: number; qty?: number; selfTransferSuspect?: boolean };
+type Res = { rows: Row[]; gain: number; aea: number; taxable: number; cgtBasic: number; cgtHigher: number; fxGbpUsd?: number; source: "LIVE" | "MOCK"; note?: string; needsManualValuation?: string[]; possibleSelfTransfers?: string[] };
+const gbp = (n: number) => `£${(n ?? 0).toLocaleString()}`;
 function Badge({ source }: { source: "LIVE" | "MOCK" }) {
   return <span className={`font-mono text-[11px] px-2 py-0.5 rounded-full border ${source === "LIVE" ? "border-ok text-ok" : "border-warn text-warn"}`}>{source}</span>;
 }
@@ -40,19 +41,20 @@ export default function Ledger() {
             <Badge source={l.source} />
           </div>
           <div className="grid sm:grid-cols-4 gap-3">
-            <Stat label="Total gain" value={`£${(l.gain || 0).toLocaleString()}`} />
-            <Stat label="Annual exempt amt" value={`£${(l.aea || 0).toLocaleString()}`} />
-            <Stat label="Taxable gain" value={`£${(l.taxable || 0).toLocaleString()}`} />
-            <Stat label="Est. CGT (24%)" value={`£${(l.cgt || 0).toLocaleString()}`} />
+            <Stat label="Total gain" value={gbp(l.gain)} />
+            <Stat label="Annual exempt amt" value={gbp(l.aea)} />
+            <Stat label="Taxable gain" value={gbp(l.taxable)} />
+            <Stat label="Est. CGT — 18% basic / 24% higher" value={`${gbp(l.cgtBasic)} / ${gbp(l.cgtHigher)}`} />
           </div>
           <div className="mt-4 overflow-x-auto">
             <table className="w-full text-sm font-mono">
               <thead className="text-muted text-left"><tr><th className="py-2">Date</th><th>Asset</th><th className="text-right">Qty</th><th className="text-right">Proceeds £</th><th className="text-right">Gain £</th></tr></thead>
               <tbody>{l.rows.map((r, i) => (
-                <tr key={i} className="border-t border-edge"><td className="py-2">{r.date}</td><td>{r.asset}</td><td className="text-right">{r.qty ?? "—"}</td><td className="text-right">{r.proceedsGbp || "—"}</td><td className={`text-right ${r.gainGbp >= 0 ? "text-ok" : "text-danger"}`}>{r.gainGbp || "—"}</td></tr>
+                <tr key={i} className="border-t border-edge"><td className="py-2">{r.date}</td><td>{r.asset}{r.selfTransferSuspect && <span title="Sent to a non-contract address — may be your own wallet, which is not a disposal" className="ml-2 text-[10px] px-1.5 py-0.5 rounded border border-warn text-warn">self?</span>}</td><td className="text-right">{r.qty ?? "—"}</td><td className="text-right">{gbp(r.proceedsGbp)}</td><td className={`text-right ${r.gainGbp >= 0 ? "text-ok" : "text-danger"}`}>{gbp(r.gainGbp)}</td></tr>
               ))}</tbody>
             </table>
           </div>
+          {l.rows.length === 0 && <p className="mt-3 text-sm text-warn">No priced disposals to report for this wallet in the window read.</p>}
           {l.note && <p className="mt-3 text-xs text-muted">{l.note}</p>}
           <div className="mt-4 flex flex-wrap gap-2">
             <a href="https://www.gov.uk/log-in-register-hmrc-online-services" target="_blank" rel="noreferrer" className="rounded-xl border border-edge px-4 py-2 text-sm hover:bg-elevated">Open HMRC Gateway ↗</a>

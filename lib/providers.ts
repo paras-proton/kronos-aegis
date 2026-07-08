@@ -1,6 +1,6 @@
 // Server-only real-data providers with graceful fallback to mock.
 // Public data only. No keys are exposed to the client.
-import { mockScan, mockContagion, mockLedger, ScanResult } from "@/lib/mock";
+import { mockScan, mockContagion, ScanResult } from "@/lib/mock";
 
 const BASE_CHAIN = "8453";
 export const isAddr = (a: string) => /^0x[a-fA-F0-9]{40}$/.test(a || "");
@@ -69,14 +69,38 @@ export async function getContagion(address: string) {
   return { ...base, baseTvlUsd: 0, source: "MOCK" as const };
 }
 
-// ---------- LEDGER: Blockscout v2 transfers + DefiLlama USD + Frankfurter FX (S104) ----------
-type PriceSeries = [number, number][];
+// ---------- LEDGER: Blockscout v2 transfers + DefiLlama USD + Frankfurter FX ----------
+// HMRC matching order, ported from scripts/uk_tax_ledger.py (SQ-UKTAX):
+//   1) same-day, 2) 30-day bed & breakfast (earliest first), 3) Section 104 pool.
+// AEA GBP3,000. CGT 18% basic / 24% higher (since 30 Oct 2024, unchanged 2026/27).
+const AEA_GBP = 3000;
+const CGT_BASIC = 0.18;
+const CGT_HIGHER = 0.24;
+
+export type LedgerRow = {
+  date: string; asset: string; qty: number;
+  proceedsGbp: number; costGbp: number; gainGbp: number;
+  selfTransferSuspect?: boolean;
+};
+
+const emptyLedger = (note: string) => ({
+  rows: [] as LedgerRow[], gain: 0, aea: AEA_GBP, taxable: 0,
+  cgtBasic: 0, cgtHigher: 0,
+  needsManualValuation: [] as string[], possibleSelfTransfers: [] as string[],
+  source: "MOCK" as const, note,
+});
 
 export async function getLedger(address: string) {
-  if (!isAddr(address)) return { ...mockLedger(address), source: "MOCK" as const, note: "Invalid address — showing sample." };
+  // Never invent GBP tax figures for bad input.
+  if (!isAddr(address)) return emptyLedger("Enter a valid Base address (0x followed by 40 hex characters). No figures are shown for invalid input.");
   try {
-    // Base Blockscout v2 REST — bounded pages (fast, keyless). Avoids pulling full history.
-    type BsItem = { timestamp: string; from?: { hash?: string }; to?: { hash?: string }; token?: { address_hash?: string; address?: string; symbol?: string; decimals?: string }; total?: { value?: string; decimals?: string } };
+    type BsItem = {
+      timestamp: string;
+      from?: { hash?: string };
+      to?: { hash?: string; is_contract?: boolean };
+      token?: { address_hash?: string; address?: string; symbol?: string; decimals?: string };
+      total?: { value?: string; decimals?: string };
+    };
     let items: BsItem[] = [];
     let next = `https://base.blockscout.com/api/v2/addresses/${address}/token-transfers?type=ERC-20`;
     for (let page = 0; page < 3 && next; page++) {
@@ -87,35 +111,35 @@ export async function getLedger(address: string) {
       next = np ? `https://base.blockscout.com/api/v2/addresses/${address}/token-transfers?type=ERC-20&${new URLSearchParams(np).toString()}` : "";
       if (items.length >= 150) break;
     }
-    if (!items.length) return { rows: [], gain: 0, aea: 3000, taxable: 0, cgt: 0, source: "LIVE" as const, note: "No ERC-20 transfers found for this wallet on Base." };
+    if (!items.length) return { ...emptyLedger("No ERC-20 transfers found for this wallet on Base."), source: "LIVE" as const };
     const addrL = address.toLowerCase();
 
-    type Ev = { ts: number; contract: string; symbol: string; qty: number; dir: 1 | -1 };
+    type Ev = { ts: number; date: string; contract: string; symbol: string; qty: number; dir: 1 | -1; toContract: boolean };
     const evs: Ev[] = items.map((it) => {
       const dec = Number(it.total?.decimals ?? it.token?.decimals ?? "18");
+      const ts = Math.floor(Date.parse(it.timestamp) / 1000);
       return {
-        ts: Math.floor(Date.parse(it.timestamp) / 1000),
+        ts,
+        date: new Date(ts * 1000).toISOString().slice(0, 10),
+        // Blockscout v2 field is `address_hash`; `address` kept as a defensive fallback.
         contract: (it.token?.address_hash || it.token?.address || "").toLowerCase(),
         symbol: it.token?.symbol || "?",
         qty: Number(it.total?.value || "0") / 10 ** dec,
         dir: ((it.to?.hash || "").toLowerCase() === addrL ? 1 : -1) as 1 | -1,
+        toContract: it.to?.is_contract === true,
       };
     }).filter((e) => e.qty > 0 && e.contract && e.ts > 0);
 
-    // FIX-3: transfers existed but none normalised — surface it, never a silent £0.
     if (!evs.length) {
-      return { rows: [], gain: 0, aea: 3000, taxable: 0, cgt: 0, source: "LIVE" as const,
-        note: `Fetched ${items.length} transfers but could not normalise any of them (unexpected upstream schema). Showing no figures rather than a misleading £0.` };
+      return { ...emptyLedger(`Fetched ${items.length} transfers but could not normalise any of them (unexpected upstream schema). Showing no figures rather than a misleading GBP0.`), source: "LIVE" as const };
     }
 
-    // DefiLlama batch historical USD prices (keyless): one call for all tokens+timestamps.
-    const byToken: Record<string, number[]> = {};
-    for (const e of evs) (byToken[e.contract] ||= []).push(e.ts);
-    // FIX-4 (critical): rounding to 12:00 UTC puts *today's* transfers in the FUTURE
-    // (any run before noon). DefiLlama silently drops the ENTIRE coin for a future
-    // timestamp, so every token came back unpriced. Clamp to just-before-now.
+    // Rounding to 12:00 UTC puts *today's* transfers in the FUTURE on any run before noon.
+    // DefiLlama silently drops the ENTIRE coin for a future timestamp. Clamp to just-before-now.
     const nowSec = Math.floor(Date.now() / 1000);
     const dayTs = (ts: number) => Math.min(Math.floor(ts / 86400) * 86400 + 43200, nowSec - 300);
+    const byToken: Record<string, number[]> = {};
+    for (const e of evs) (byToken[e.contract] ||= []).push(e.ts);
     const coinsReq: Record<string, number[]> = {};
     for (const c of Object.keys(byToken)) coinsReq[`base:${c}`] = [...new Set(byToken[c].map(dayTs))].slice(0, 60);
     let priceData: Record<string, { prices?: { timestamp: number; price: number }[] }> = {};
@@ -124,54 +148,105 @@ export async function getLedger(address: string) {
       priceData = (pj?.coins || {}) as typeof priceData;
     } catch { /* leave empty -> unpriced */ }
 
-    const fx = await gbpPerUsd(); // GBP per USD
+    const fx = await gbpPerUsd();
     const priceGbpAt = (contract: string, ts: number): number | null => {
-      const d = priceData[`base:${contract}`];
-      const arr = d?.prices;
+      const arr = priceData[`base:${contract}`]?.prices;
       if (!arr || !arr.length) return null;
       let best = arr[0], bd = Math.abs(best.timestamp - ts);
       for (const p of arr) { const dd = Math.abs(p.timestamp - ts); if (dd < bd) { bd = dd; best = p; } }
       return best.price * fx;
     };
 
-    // FIX-2: a pool whose acquisitions could not all be priced has an UNKNOWN cost basis.
-    // Booking its disposals would set cost=0 and OVERSTATE the gain. Quarantine instead.
-    const pools: Record<string, { qty: number; cost: number; tainted: boolean }> = {};
-    const rows: { date: string; asset: string; qty: number; proceedsGbp: number; costGbp: number; gainGbp: number }[] = [];
-    let totalGain = 0;
-    const unpriced = new Set<string>();
-    const needsReview = new Set<string>();
-    for (const e of evs.sort((a, b) => a.ts - b.ts)) {
-      const price = priceGbpAt(e.contract, e.ts);
-      const p = (pools[e.contract] ||= { qty: 0, cost: 0, tainted: false });
+    // An asset with ANY unpriced event has an unknowable cost basis. Exclude it from the
+    // totals entirely and say so. Never book it at cost 0 — that overstates the gain.
+    const byContract: Record<string, Ev[]> = {};
+    for (const e of evs) (byContract[e.contract] ||= []).push(e);
 
-      if (e.dir === 1) {
-        if (price == null) { unpriced.add(e.symbol); p.qty += e.qty; p.tainted = true; }
-        else { p.qty += e.qty; p.cost += e.qty * price; }
+    const rows: LedgerRow[] = [];
+    const needsManualValuation = new Set<string>();
+    const possibleSelfTransfers = new Set<string>();
+    let totalGain = 0;
+
+    for (const [contract, list] of Object.entries(byContract)) {
+      const priced = list.map((e) => ({ ...e, price: priceGbpAt(contract, e.ts) }));
+      if (priced.some((e) => e.price == null)) {
+        if (priced.some((e) => e.dir === -1)) needsManualValuation.add(list[0].symbol);
         continue;
       }
 
-      if (price == null) { unpriced.add(e.symbol); needsReview.add(e.symbol); continue; }
-      if (p.tainted) { needsReview.add(e.symbol); p.qty = Math.max(0, p.qty - e.qty); continue; }
-      if (p.qty <= 0) needsReview.add(e.symbol);
+      type Acq = { date: string; qty: number; remaining: number; cpu: number };
+      const acqs: Acq[] = priced.filter((e) => e.dir === 1)
+        .map((e) => ({ date: e.date, qty: e.qty, remaining: e.qty, cpu: e.price as number }));
+      const sells = priced.filter((e) => e.dir === -1).sort((a, b) => a.ts - b.ts);
 
-      const proceeds = e.qty * price;
-      const costPortion = p.qty > 0 ? p.cost * (Math.min(e.qty, p.qty) / p.qty) : 0;
-      const gain = proceeds - costPortion;
-      p.qty = Math.max(0, p.qty - e.qty); p.cost = Math.max(0, p.cost - costPortion);
-      totalGain += gain;
-      rows.push({ date: new Date(e.ts * 1000).toISOString().slice(0, 10), asset: e.symbol, qty: Number(e.qty.toFixed(4)), proceedsGbp: Math.round(proceeds), costGbp: Math.round(costPortion), gainGbp: Math.round(gain) });
+      for (const s of sells) {
+        let q = s.qty;
+        const proceeds = s.qty * (s.price as number);
+        let matchedCost = 0;
+
+        const take = (pool: Acq[]) => {
+          for (const a of pool) {
+            if (q <= 1e-12) break;
+            if (a.remaining <= 1e-12) continue;
+            const tq = Math.min(a.remaining, q);
+            matchedCost += tq * a.cpu;
+            a.remaining -= tq; q -= tq;
+          }
+        };
+        const dayMs = (d: string) => Date.parse(d + "T00:00:00Z");
+        const sd = dayMs(s.date);
+
+        take(acqs.filter((a) => dayMs(a.date) === sd));                                       // 1 same-day
+        take(acqs.filter((a) => dayMs(a.date) > sd && dayMs(a.date) <= sd + 30 * 86400000)    // 2 30-day B&B
+                 .sort((a, b) => dayMs(a.date) - dayMs(b.date)));
+        const pool = acqs.filter((a) => dayMs(a.date) <= sd && a.remaining > 1e-12);          // 3 Section 104
+        const poolQty = pool.reduce((t, a) => t + a.remaining, 0);
+        if (q > 1e-12 && poolQty > 1e-12) {
+          const avg = pool.reduce((t, a) => t + a.remaining * a.cpu, 0) / poolQty;
+          const tq = Math.min(q, poolQty);
+          matchedCost += tq * avg;
+          for (const a of pool) a.remaining -= tq * (a.remaining / poolQty);
+          q -= tq;
+        }
+        if (q > 1e-12) needsManualValuation.add(s.symbol); // disposal with no acquisition in window
+
+        // A transfer to a non-contract address may be a move between the user's own wallets,
+        // which is not a disposal. Flag it; do not silently drop it (gifts ARE disposals).
+        const selfTransferSuspect = !s.toContract;
+        if (selfTransferSuspect) possibleSelfTransfers.add(s.symbol);
+
+        const gain = proceeds - matchedCost;
+        totalGain += gain;
+        rows.push({
+          date: s.date, asset: s.symbol, qty: Number(s.qty.toFixed(4)),
+          proceedsGbp: Math.round(proceeds), costGbp: Math.round(matchedCost), gainGbp: Math.round(gain),
+          selfTransferSuspect,
+        });
+      }
     }
-    const gain = Math.round(totalGain), aea = 3000, taxable = Math.max(0, gain - aea), cgt = Math.round(taxable * 0.24);
+
+    rows.sort((a, b) => (a.date < b.date ? 1 : -1));
+    const gain = Math.round(totalGain);
+    const taxable = Math.max(0, gain - AEA_GBP);
+    const cgtBasic = Math.round(taxable * CGT_BASIC);
+    const cgtHigher = Math.round(taxable * CGT_HIGHER);
+
     const note = [
-      `Live: Base Blockscout transfers + DefiLlama historical USD prices at GBP FX ${fx.toFixed(3)}, S104 pooled.`,
-      unpriced.size ? `Unpriced (no DefiLlama price): ${[...unpriced].slice(0, 6).join(", ")}.` : "",
-      needsReview.size ? `EXCLUDED from the CGT total — cost basis could not be established: ${[...needsReview].slice(0, 6).join(", ")}. These disposals are real; value them manually.` : "",
-      `Only the most recent ${items.length} ERC-20 transfers were read, FX is current (not historical), and pre-window holdings may understate cost basis. Estimate only — verify before filing.`,
+      `Live: Base Blockscout transfers + DefiLlama historical USD prices at GBP FX ${fx.toFixed(3)}. HMRC matching applied in order: same-day, 30-day bed & breakfast, then Section 104 pool.`,
+      needsManualValuation.size ? `EXCLUDED from every figure above (no reliable cost basis): ${[...needsManualValuation].slice(0, 6).join(", ")}. These disposals are real — value them manually.` : "",
+      possibleSelfTransfers.size ? `FLAGGED and still counted: ${[...possibleSelfTransfers].slice(0, 6).join(", ")} were sent to non-contract addresses. If those are your own wallets they are NOT disposals — exclude them yourself.` : "",
+      `Only the most recent ${items.length} ERC-20 transfers were read; FX is current, not historical; holdings acquired before this window understate cost basis. CGT is shown at both bands because it depends on your income. Estimate only — verify before filing.`,
     ].filter(Boolean).join(" ");
-    return { rows: rows.slice(-20).reverse(), gain, aea, taxable, cgt, fxGbpUsd: Number(fx.toFixed(4)), needsReview: [...needsReview], source: "LIVE" as const, note };
+
+    return {
+      rows: rows.slice(0, 20), gain, aea: AEA_GBP, taxable, cgtBasic, cgtHigher,
+      fxGbpUsd: Number(fx.toFixed(4)),
+      needsManualValuation: [...needsManualValuation],
+      possibleSelfTransfers: [...possibleSelfTransfers],
+      source: "LIVE" as const, note,
+    };
   } catch {
-    return { ...mockLedger(address), source: "MOCK" as const, note: "Live call failed — showing sample." };
+    return emptyLedger("Live data call failed. No figures are shown rather than misleading ones. Try again shortly.");
   }
 }
 
