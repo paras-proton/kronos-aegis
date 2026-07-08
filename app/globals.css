@@ -1,0 +1,96 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: dark; }
+html, body { background: #0A0B0D; color: #EDEEF0; }
+body { font-feature-settings: "ss01"; -webkit-font-smoothing: antialiased; }
+
+.grid-tex {
+  background-image:
+    linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+  background-size: 34px 34px;
+}
+.glow { background: radial-gradient(60% 55% at 50% 0%, rgba(232,179,65,0.16), transparent 70%); }
+
+@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+.cursor { display: inline-block; width: 2px; height: 1.05em; background: #E8B341; margin-left: 3px; vertical-align: -2px; animation: blink 1s step-end infinite; }
+
+.reveal { opacity: 0; transform: translateY(18px); transition: opacity 0.6s cubic-bezier(0.2,0.7,0.2,1), transform 0.6s cubic-bezier(0.2,0.7,0.2,1); }
+.reveal.in { opacity: 1; transform: none; }
+
+@keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.fadeup { animation: fadeUp 0.55s ease both; }
+
+@keyframes introClear { from { opacity: 0; filter: blur(6px); } to { opacity: 1; filter: blur(0); } }
+.intro-blur { animation: introClear 1.1s ease 0.15s both; }
+
+/* Spotlight cards (motionsites "Animated Cards" port) */
+.spotcard { position: relative; border-radius: 1rem; padding: 1px; background:
+  linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.02)); overflow: hidden; height: 100%; }
+.spotcard::before { content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 1px;
+  background: conic-gradient(from 0deg, transparent 0 65%, rgba(232,179,65,0.55) 80%, transparent 92%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude; opacity: 0; transition: opacity 0.4s; animation: spin 6s linear infinite; }
+.spotcard:hover::before { opacity: 1; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.spotcard-glow { position: absolute; inset: 0; border-radius: inherit; opacity: 0; transition: opacity 0.3s; pointer-events: none;
+  background: radial-gradient(240px circle at var(--mx, 50%) var(--my, 50%), rgba(232,179,65,0.16), transparent 60%); }
+.spotcard:hover .spotcard-glow { opacity: 1; }
+.spotcard-body { position: relative; height: 100%; border-radius: calc(1rem - 1px); background: #14161A; padding: 1.5rem; }
+
+/* Hero aurora fade mask */
+.aurora-wrap { -webkit-mask-image: radial-gradient(120% 90% at 50% 0%, #000 55%, transparent 100%);
+  mask-image: radial-gradient(120% 90% at 50% 0%, #000 55%, transparent 100%); }
+
+/* GlowCard (motionsites "Glow Features" port) */
+.glowcard-glow { opacity: 0.45; transition: opacity 0.4s ease, transform 0.4s ease; }
+.glowcard:hover .glowcard-glow { opacity: 0.75; transform: scale(1.03); }
+
+/* Staggered char fade (motionsites "Organic Odyssey" port) */
+@keyframes charIn { from { opacity: 0; transform: translateY(0.34em); } to { opacity: 1; transform: none; } }
+.stagger-char { display: inline-block; opacity: 0; white-space: pre; animation: charIn 0.5s cubic-bezier(0.2,0.7,0.2,1) forwards; }
+
+/* Liquid glass button border (motionsites "Organic Odyssey" port) */
+.liquid-glass { position: relative; overflow: hidden; box-shadow: inset 0 1px 1px rgba(255,255,255,0.20); }
+.liquid-glass::before { content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 1.4px; pointer-events: none;
+  background: linear-gradient(180deg, rgba(232,179,65,0.55) 0%, rgba(255,255,255,0.15) 20%, rgba(255,255,255,0) 42%, rgba(255,255,255,0) 58%, rgba(255,255,255,0.15) 80%, rgba(232,179,65,0.55) 100%);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0); -webkit-mask-composite: xor; mask-composite: exclude; }
+.liquid-glass:active { transform: scale(0.98); }
+
+/* Visible CSS aurora (replaces faint canvas) — big drifting colour glows */
+.aurora-css { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.aurora-css i { position: absolute; display: block; border-radius: 9999px; filter: blur(70px); opacity: 0.55; mix-blend-mode: screen; }
+.aurora-css .b1 { width: 540px; height: 540px; background: #E8B341; left: 4%;  top: -160px; animation: afloat1 15s ease-in-out infinite; }
+.aurora-css .b2 { width: 500px; height: 500px; background: #7C5CFF; right: 2%; top: -120px; animation: afloat2 19s ease-in-out infinite; }
+.aurora-css .b3 { width: 460px; height: 460px; background: #3B9EFF; left: 38%; top: -60px;  animation: afloat3 17s ease-in-out infinite; }
+@keyframes afloat1 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(80px,40px) scale(1.12); } }
+@keyframes afloat2 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(-90px,30px) scale(1.08); } }
+@keyframes afloat3 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(40px,60px) scale(1.15); } }
+@media (prefers-reduced-motion: reduce) { .aurora-css i { animation: none; } }
+
+/* ShinyText (motionsites "DesignPro" port): continuous gradient sweep across text */
+.shiny { background: linear-gradient(100deg, #E8B341 42%, #FFFFFF 50%, #E8B341 58%); background-size: 220% auto;
+  -webkit-background-clip: text; background-clip: text; color: transparent; -webkit-text-fill-color: transparent;
+  animation: shine 3.2s linear infinite; }
+@keyframes shine { to { background-position: -220% center; } }
+@media (prefers-reduced-motion: reduce) { .shiny { animation: none; } }
+
+/* ===== Taste-engine polish: micro-interactions, focus, hierarchy ===== */
+/* Accessible focus rings on all interactive elements */
+a:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px #0A0B0D, 0 0 0 4px rgba(232,179,65,0.55);
+  border-radius: 12px;
+}
+input:focus-visible, textarea:focus-visible { border-color: #E8B341; }
+/* Tactile press + smooth transitions on controls */
+button, a[class*="rounded"] { transition: transform .16s cubic-bezier(.2,.7,.2,1), filter .16s ease, background-color .16s ease, color .16s ease; }
+button:active, a[class*="rounded"]:active { transform: translateY(1px) scale(.985); }
+/* Glow cards gain a subtle hover lift (respecting reduced motion) */
+.glowcard { transition: transform .28s cubic-bezier(.2,.7,.2,1); will-change: transform; }
+@media (hover: hover) { .glowcard:hover { transform: translateY(-3px); } }
+@media (prefers-reduced-motion: reduce) { .glowcard, button, a[class*="rounded"] { transition: none; } .glowcard:hover { transform: none; } }
+/* Crisper type rendering */
+h1, h2, h3 { text-wrap: balance; }

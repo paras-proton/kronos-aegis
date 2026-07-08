@@ -1,0 +1,22 @@
+# KRONOS Aegis
+
+> Read-only, public on-chain intelligence for the Base network. KRONOS Aegis checks a token's safety before you commit, maps collateral and bridge contagion while you hold, and reconstructs UK crypto tax (CARF/CGT) when you file — all from public data, with no wallet connection and no advice.
+
+## What it does
+- Scan: pre-commit token safety on Base (liquidity & LP-lock, holder concentration, honeypot / sell-tax simulation, owner privileges, contract verification).
+- Depth: recursive collateral & bridge contagion mapping with a Derivative Tier score and single-point bridge risk flags.
+- Ledger: UK CARF / Capital Gains Tax reconstruction — disposals valued in GBP by block timestamp for Self-Assessment prep.
+- Agents: every instrument is exposed as a read-only MCP tool + JSON endpoint for AI agents.
+
+## Principles
+- Read-only. No wallet connection, signatures, or approvals — ever.
+- Public data only (BaseScan, DEX liquidity, public safety APIs, TVL/bridge data, GBP FX).
+- Not financial or tax advice. No profit, yield, or return is promised. Data reconstruction, not advice.
+
+## Key pages
+- Home: https://www.kronosaegis.com/
+- Scan: https://www.kronosaegis.com/scan
+- Depth: https://www.kronosaegis.com/depth
+- Ledger: https://www.kronosaegis.com/ledger
+- Agents (MCP API): https://www.kronosaegis.com/agents
+- Learn: https://www.kronosaegis.com/learn
